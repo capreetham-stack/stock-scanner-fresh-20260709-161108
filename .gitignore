@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local secrets and credentials
+.env
+*.service-account.json
+*credentials*.json
+studious-apex-269208-bde61abad108.json
+
+# Runtime output
+logs/
+output/
+
+# macOS
+.DS_Store
