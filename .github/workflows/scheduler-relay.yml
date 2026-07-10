@@ -1,0 +1,59 @@
+name: Scheduler Relay
+
+on:
+  schedule:
+    # Poll every 5 minutes on weekdays and dispatch due slots in IST.
+    - cron: "*/5 3-10 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-due-slot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine due run type in IST
+        id: slot
+        run: |
+          set -euo pipefail
+          IST_HOUR=$(TZ=Asia/Kolkata date +"%H")
+          IST_MIN=$(TZ=Asia/Kolkata date +"%M")
+          IST_NOW=$(TZ=Asia/Kolkata date +"%Y-%m-%d %H:%M:%S %Z")
+          MIN_NUM=$((10#$IST_MIN))
+
+          RUN_TYPE=""
+
+          if [ "$IST_HOUR" = "09" ] && [ "$MIN_NUM" -ge 15 ] && [ "$MIN_NUM" -le 19 ]; then
+            RUN_TYPE="morning"
+          elif [ "$IST_HOUR" -ge 10 ] && [ "$IST_HOUR" -le 15 ] && [ "$MIN_NUM" -ge 15 ] && [ "$MIN_NUM" -le 19 ]; then
+            RUN_TYPE="hourly"
+          elif [ "$IST_HOUR" = "15" ] && [ "$MIN_NUM" -ge 45 ] && [ "$MIN_NUM" -le 49 ]; then
+            RUN_TYPE="evening"
+          fi
+
+          echo "ist_now=$IST_NOW" >> "$GITHUB_OUTPUT"
+          echo "run_type=$RUN_TYPE" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch daily scan workflow
+        if: ${{ steps.slot.outputs.run_type != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_TYPE: ${{ steps.slot.outputs.run_type }}
+        run: |
+          set -euo pipefail
+          echo "IST now: ${{ steps.slot.outputs.ist_now }}"
+          echo "Dispatching Daily NSE Scan with run_type=$RUN_TYPE"
+
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/daily-scan.yml/dispatches" \
+            -d "{\"ref\":\"main\",\"inputs\":{\"run_type\":\"$RUN_TYPE\"}}"
+
+      - name: No slot due
+        if: ${{ steps.slot.outputs.run_type == '' }}
+        run: |
+          echo "IST now: ${{ steps.slot.outputs.ist_now }}"
+          echo "No market slot due in this 5-minute window."
