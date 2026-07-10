@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Append EOD movement summary below the daily recommendations table.
+Create the daily EOD follow-up worksheet.
 
-This script does not alter recommendation rows/columns.
-It appends (or refreshes) a section below the existing data in today's
-PRE_MARKET_YYYY-MM-DD worksheet (legacy PRE915_YYYY-MM-DD is also supported).
-If a pre-market tab is unavailable, it falls back to HOURLY_YYYY-MM-DD.
+This script reads the latest intraday recommendation tab for the day
+(PRE_MARKET_YYYY-MM-DD, legacy PRE915_YYYY-MM-DD, or HOURLY_YYYY-MM-DD),
+then writes a dedicated EOD_NEXTDAY_YYYY-MM-DD worksheet with the follow-up
+movement summary.
 """
 
 from __future__ import annotations
@@ -81,6 +81,13 @@ def pick_latest_tab(spreadsheet, prefix: str | list[str]) -> gspread.Worksheet:
     return tabs[-1]
 
 
+def ensure_worksheet(spreadsheet, title: str, rows: int = 200, cols: int = 20) -> gspread.Worksheet:
+    try:
+        return spreadsheet.worksheet(title)
+    except gspread.WorksheetNotFound:
+        return spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
+
+
 def col_letter(index_1_based: int) -> str:
     letters = ""
     n = index_1_based
@@ -124,18 +131,26 @@ def main() -> None:
         raise RuntimeError("Missing/invalid GOOGLE_APPLICATION_CREDENTIALS path")
 
     today = dt.datetime.now(IST).strftime("%Y-%m-%d")
-    morning_prefixes = [f"PRE_MARKET_{today}", f"PRE915_{today}", f"HOURLY_{today}"]
+    source_prefixes = [f"PRE_MARKET_{today}", f"PRE915_{today}", f"HOURLY_{today}"]
+    eod_title = f"EOD_NEXTDAY_{today}"
 
     sh = open_sheet(sheet_target, creds_path)
-    ws = pick_latest_tab(sh, morning_prefixes)
-    morning_rows = ws.get_all_records()
-    if not morning_rows:
-        raise RuntimeError(f"Morning worksheet {ws.title} has no data")
+    try:
+        source_ws = pick_latest_tab(sh, source_prefixes)
+        source_rows = source_ws.get_all_records()
+        source_title = source_ws.title
+    except RuntimeError:
+        source_ws = None
+        source_rows = []
+        source_title = "(no source tab found)"
+
+    eod_ws = ensure_worksheet(sh, eod_title)
+    eod_ws.clear()
 
     fetcher = NSEFetcher()
     movement_rows: list[list[Any]] = []
 
-    for idx, row in enumerate(morning_rows, 1):
+    for idx, row in enumerate(source_rows, 1):
         symbol = str(row_value(row, "Symbol", "symbol", default="")).strip()
         if not symbol or symbol.upper() == "NONE":
             continue
@@ -169,10 +184,6 @@ def main() -> None:
             status,
         ])
 
-    if not movement_rows:
-        print("No valid morning recommendations to append follow-up for.")
-        return
-
     headers = [
         "Rank",
         "Symbol",
@@ -188,28 +199,28 @@ def main() -> None:
     generated_at = dt.datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
     values = [
         make_row([SECTION_MARKER], width),
+        make_row([f"Source tab: {source_title}"], width),
         make_row([f"Generated: {generated_at}"], width),
         make_row([], width),
         make_row(headers, width),
     ]
-    values.extend(make_row(r, width) for r in movement_rows)
 
-    marker_row = find_marker_row(ws, SECTION_MARKER)
-    if marker_row is not None:
-        start_row = marker_row
-        current_rows = ws.row_count
-        end_col = col_letter(width)
-        ws.batch_clear([f"A{start_row}:{end_col}{current_rows}"])
+    if movement_rows:
+        values.extend(make_row(r, width) for r in movement_rows)
     else:
-        start_row = len(morning_rows) + 3
+        values.append(make_row(["No source rows found for follow-up"], width))
+
+    start_row = 1
 
     end_row = start_row + len(values) - 1
     end_col = col_letter(width)
-    ws.update(range_name=f"A{start_row}:{end_col}{end_row}", values=values, value_input_option="RAW")
+    eod_ws.update(range_name=f"A{start_row}:{end_col}{end_row}", values=values, value_input_option="RAW")
+    eod_ws.freeze(rows=1)
 
     print(
         {
-            "morning_tab": ws.title,
+            "source_tab": source_title,
+            "eod_tab": eod_ws.title,
             "section_start_row": start_row,
             "rows_written": len(movement_rows),
         }
