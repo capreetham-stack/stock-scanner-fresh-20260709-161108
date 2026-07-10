@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Append EOD movement summary below the morning recommendations table.
+Append EOD movement summary below the daily recommendations table.
 
-This script does not alter morning recommendation rows/columns.
-It only appends (or refreshes) a section below the existing data in the
-latest PRE_MARKET_YYYY-MM-DD worksheet (legacy PRE915_YYYY-MM-DD is also supported).
+This script does not alter recommendation rows/columns.
+It appends (or refreshes) a section below the existing data in today's
+PRE_MARKET_YYYY-MM-DD worksheet (legacy PRE915_YYYY-MM-DD is also supported).
+If a pre-market tab is unavailable, it falls back to HOURLY_YYYY-MM-DD.
 """
 
 from __future__ import annotations
@@ -123,7 +124,7 @@ def main() -> None:
         raise RuntimeError("Missing/invalid GOOGLE_APPLICATION_CREDENTIALS path")
 
     today = dt.datetime.now(IST).strftime("%Y-%m-%d")
-    morning_prefixes = [f"PRE_MARKET_{today}", f"PRE915_{today}"]
+    morning_prefixes = [f"PRE_MARKET_{today}", f"PRE915_{today}", f"HOURLY_{today}"]
 
     sh = open_sheet(sheet_target, creds_path)
     ws = pick_latest_tab(sh, morning_prefixes)
