@@ -32,14 +32,17 @@ jobs:
           if [ "$HOUR_NUM" -eq 9 ] && [ "$MIN_NUM" -ge 15 ]; then
             RUN_TYPE="morning"
             SLOT_START_IST="$IST_DATE 09:15:00"
-          # Hourly slot: each hour from 10:15 to 15:15. Backfill in same hour window.
-          elif [ "$HOUR_NUM" -ge 10 ] && [ "$HOUR_NUM" -le 15 ] && [ "$MIN_NUM" -ge 15 ]; then
-            RUN_TYPE="hourly"
-            SLOT_START_IST="$IST_DATE ${IST_HOUR}:15:00"
           # Evening slot: from 15:45 onwards (allow into 16:xx for delayed execution).
           elif { [ "$HOUR_NUM" -eq 15 ] && [ "$MIN_NUM" -ge 45 ]; } || [ "$HOUR_NUM" -eq 16 ]; then
             RUN_TYPE="evening"
             SLOT_START_IST="$IST_DATE 15:45:00"
+          # Hourly slot: 10:15..14:59 and final slot 15:15..15:44.
+          elif [ "$HOUR_NUM" -ge 10 ] && [ "$HOUR_NUM" -le 14 ] && [ "$MIN_NUM" -ge 15 ]; then
+            RUN_TYPE="hourly"
+            SLOT_START_IST="$IST_DATE ${IST_HOUR}:15:00"
+          elif [ "$HOUR_NUM" -eq 15 ] && [ "$MIN_NUM" -ge 15 ] && [ "$MIN_NUM" -lt 45 ]; then
+            RUN_TYPE="hourly"
+            SLOT_START_IST="$IST_DATE 15:15:00"
           fi
 
           SLOT_START_EPOCH=""
