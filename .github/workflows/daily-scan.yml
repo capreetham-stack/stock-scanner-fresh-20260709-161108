@@ -4,15 +4,16 @@ on:
   schedule:
     # 03:45 UTC = 09:15 IST, Monday-Friday (Morning scan at market open)
     - cron: "45 3 * * 1-5"
+    # 03:46 UTC retry for morning if the exact slot is delayed or dropped
+    - cron: "46 3 * * 1-5"
+    # Hourly scans at 04:45-09:45 UTC = 10:15-15:15 IST, Monday-Friday
+    - cron: "45 4,5,6,7,8,9 * * 1-5"
+    # Retry one minute later for each hourly slot
+    - cron: "46 4,5,6,7,8,9 * * 1-5"
     # 10:15 UTC = 15:45 IST, Monday-Friday (Evening follow-up at EOD)
     - cron: "15 10 * * 1-5"
-    # Hourly scans at 04:45-09:45 UTC = 10:15-15:15 IST, Monday-Friday
-    - cron: "45 4 * * 1-5"
-    - cron: "45 5 * * 1-5"
-    - cron: "45 6 * * 1-5"
-    - cron: "45 7 * * 1-5"
-    - cron: "45 8 * * 1-5"
-    - cron: "45 9 * * 1-5"
+    # 10:16 UTC retry for evening if the exact slot is delayed or dropped
+    - cron: "16 10 * * 1-5"
   workflow_dispatch:
     inputs:
       run_type:
@@ -27,12 +28,16 @@ on:
           - hourly
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
   run-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: daily-nse-scan
+      cancel-in-progress: false
 
     steps:
       - name: Checkout
@@ -84,6 +89,7 @@ jobs:
           GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
           GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
           GOOGLE_APPLICATION_CREDENTIALS: .github/secrets/google-service-account.json
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ -z "$GOOGLE_SHEET_URL" ] && [ -z "${GOOGLE_SHEET_KEY:-}" ]; then
@@ -100,18 +106,41 @@ jobs:
             SCHEDULE_MIN=$(echo "$SCHEDULE" | awk '{print $1}')
             SCHEDULE_HOUR=$(echo "$SCHEDULE" | awk '{print $2}')
             echo "Schedule minute: $SCHEDULE_MIN; hour field: $SCHEDULE_HOUR" >> logs/github-actions.log
-            if [ "$SCHEDULE_MIN" = "15" ] && [ "$SCHEDULE_HOUR" = "10" ]; then
+
+            IS_RETRY=0
+            if [ "$SCHEDULE_MIN" = "46" ] || [ "$SCHEDULE_MIN" = "16" ]; then
+              IS_RETRY=1
+            fi
+
+            if [ "$SCHEDULE_HOUR" = "10" ] && { [ "$SCHEDULE_MIN" = "15" ] || [ "$SCHEDULE_MIN" = "16" ]; }; then
               RUN_TYPE="evening"
-            elif [ "$SCHEDULE_MIN" = "45" ] && [ "$SCHEDULE_HOUR" = "3" ]; then
+            elif [ "$SCHEDULE_HOUR" = "3" ] && { [ "$SCHEDULE_MIN" = "45" ] || [ "$SCHEDULE_MIN" = "46" ]; }; then
               RUN_TYPE="morning"
-            elif [ "$SCHEDULE_MIN" = "28" ] || ( [ "$SCHEDULE_MIN" = "45" ] && [ "$SCHEDULE_HOUR" -ge 4 ] && [ "$SCHEDULE_HOUR" -le 9 ] ); then
+            elif [ "$SCHEDULE_HOUR" -ge 4 ] && [ "$SCHEDULE_HOUR" -le 9 ] && { [ "$SCHEDULE_MIN" = "45" ] || [ "$SCHEDULE_MIN" = "46" ]; }; then
               RUN_TYPE="hourly"
             else
-              # Fallback: if minute is 45 and hour falls into expected UTC market window, treat as hourly
-              if [ "$SCHEDULE_MIN" = "45" ] && [ "$SCHEDULE_HOUR" -ge 4 ] && [ "$SCHEDULE_HOUR" -le 9 ]; then
-                RUN_TYPE="hourly"
-              else
-                RUN_TYPE="morning"
+              echo "No matching slot for schedule '$SCHEDULE'; exiting cleanly." >> logs/github-actions.log
+              exit 0
+            fi
+
+            if [ "$IS_RETRY" = "1" ]; then
+              echo "Retry slot detected for $RUN_TYPE. Checking for a recent successful or active scheduled run." >> logs/github-actions.log
+              RECENT_RUNS=$(curl -fsSL \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=20")
+
+              RECENT_COUNT=$(printf '%s' "$RECENT_RUNS" | jq --arg current "$GITHUB_RUN_ID" '[
+                .workflow_runs[]
+                | select(.id != ($current | tonumber))
+                | select(.event == "schedule")
+                | select(.status == "in_progress" or .conclusion == "success")
+                | select((now - ((.created_at | fromdateiso8601))) <= 1200)
+              ] | length')
+
+              if [ "$RECENT_COUNT" -gt 0 ]; then
+                echo "A recent scheduled run already exists; skipping retry duplicate." >> logs/github-actions.log
+                exit 0
               fi
             fi
           else
