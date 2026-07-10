@@ -20,30 +20,64 @@ jobs:
           set -euo pipefail
           IST_HOUR=$(TZ=Asia/Kolkata date +"%H")
           IST_MIN=$(TZ=Asia/Kolkata date +"%M")
+          IST_DATE=$(TZ=Asia/Kolkata date +"%Y-%m-%d")
           IST_NOW=$(TZ=Asia/Kolkata date +"%Y-%m-%d %H:%M:%S %Z")
+          HOUR_NUM=$((10#$IST_HOUR))
           MIN_NUM=$((10#$IST_MIN))
 
           RUN_TYPE=""
+          SLOT_START_IST=""
 
-          if [ "$IST_HOUR" = "09" ] && [ "$MIN_NUM" -ge 15 ] && [ "$MIN_NUM" -le 19 ]; then
+          # Morning slot: from 09:15 until before 10:15. Backfill if missed.
+          if [ "$HOUR_NUM" -eq 9 ] && [ "$MIN_NUM" -ge 15 ]; then
             RUN_TYPE="morning"
-          elif [ "$IST_HOUR" -ge 10 ] && [ "$IST_HOUR" -le 15 ] && [ "$MIN_NUM" -ge 15 ] && [ "$MIN_NUM" -le 19 ]; then
+            SLOT_START_IST="$IST_DATE 09:15:00"
+          # Hourly slot: each hour from 10:15 to 15:15. Backfill in same hour window.
+          elif [ "$HOUR_NUM" -ge 10 ] && [ "$HOUR_NUM" -le 15 ] && [ "$MIN_NUM" -ge 15 ]; then
             RUN_TYPE="hourly"
-          elif [ "$IST_HOUR" = "15" ] && [ "$MIN_NUM" -ge 45 ] && [ "$MIN_NUM" -le 49 ]; then
+            SLOT_START_IST="$IST_DATE ${IST_HOUR}:15:00"
+          # Evening slot: from 15:45 onwards (allow into 16:xx for delayed execution).
+          elif { [ "$HOUR_NUM" -eq 15 ] && [ "$MIN_NUM" -ge 45 ]; } || [ "$HOUR_NUM" -eq 16 ]; then
             RUN_TYPE="evening"
+            SLOT_START_IST="$IST_DATE 15:45:00"
+          fi
+
+          SLOT_START_EPOCH=""
+          if [ -n "$SLOT_START_IST" ]; then
+            SLOT_START_EPOCH=$(TZ=Asia/Kolkata date -d "$SLOT_START_IST" +%s)
           fi
 
           echo "ist_now=$IST_NOW" >> "$GITHUB_OUTPUT"
           echo "run_type=$RUN_TYPE" >> "$GITHUB_OUTPUT"
+          echo "slot_start_epoch=$SLOT_START_EPOCH" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch daily scan workflow
         if: ${{ steps.slot.outputs.run_type != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_TYPE: ${{ steps.slot.outputs.run_type }}
+          SLOT_START_EPOCH: ${{ steps.slot.outputs.slot_start_epoch }}
         run: |
           set -euo pipefail
           echo "IST now: ${{ steps.slot.outputs.ist_now }}"
+          echo "Candidate dispatch for run_type=$RUN_TYPE"
+
+          RUNS=$(curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/daily-scan.yml/runs?per_page=50")
+
+          EXISTING_COUNT=$(printf '%s' "$RUNS" | jq --argjson slot "$SLOT_START_EPOCH" '[
+            .workflow_runs[]
+            | select((.created_at | fromdateiso8601) >= $slot)
+            | select(.status == "queued" or .status == "in_progress" or .status == "completed")
+          ] | length')
+
+          if [ "$EXISTING_COUNT" -gt 0 ]; then
+            echo "A Daily NSE Scan run already exists for this slot window. Skipping dispatch."
+            exit 0
+          fi
+
           echo "Dispatching Daily NSE Scan with run_type=$RUN_TYPE"
 
           curl -fsSL -X POST \
