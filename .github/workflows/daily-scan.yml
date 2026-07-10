@@ -2,10 +2,10 @@ name: Daily NSE Scan
 
 on:
   schedule:
-    # 04:12 UTC = 09:42 IST, Monday-Friday (Morning scan off-peak)
-    - cron: "12 4 * * 1-5"
-    # 10:13 UTC = 15:43 IST, Monday-Friday (Evening follow-up off-peak)
-    - cron: "13 10 * * 1-5"
+    # 03:45 UTC = 09:15 IST, Monday-Friday (Morning scan at market open)
+    - cron: "45 3 * * 1-5"
+    # 10:15 UTC = 15:45 IST, Monday-Friday (Evening follow-up at EOD)
+    - cron: "15 10 * * 1-5"
     # Hourly scans at 04:45-09:45 UTC = 10:15-15:15 IST, Monday-Friday
     - cron: "45 4 * * 1-5"
     - cron: "45 5 * * 1-5"
@@ -100,9 +100,9 @@ jobs:
             SCHEDULE_MIN=$(echo "$SCHEDULE" | awk '{print $1}')
             SCHEDULE_HOUR=$(echo "$SCHEDULE" | awk '{print $2}')
             echo "Schedule minute: $SCHEDULE_MIN; hour field: $SCHEDULE_HOUR" >> logs/github-actions.log
-            if [ "$SCHEDULE_MIN" = "13" ] && [ "$SCHEDULE_HOUR" = "10" ]; then
+            if [ "$SCHEDULE_MIN" = "15" ] && [ "$SCHEDULE_HOUR" = "10" ]; then
               RUN_TYPE="evening"
-            elif [ "$SCHEDULE_MIN" = "12" ] && [ "$SCHEDULE_HOUR" = "4" ]; then
+            elif [ "$SCHEDULE_MIN" = "45" ] && [ "$SCHEDULE_HOUR" = "3" ]; then
               RUN_TYPE="morning"
             elif [ "$SCHEDULE_MIN" = "28" ] || ( [ "$SCHEDULE_MIN" = "45" ] && [ "$SCHEDULE_HOUR" -ge 4 ] && [ "$SCHEDULE_HOUR" -le 9 ] ); then
               RUN_TYPE="hourly"
