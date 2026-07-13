@@ -52,17 +52,20 @@ jobs:
 
           RUN_TYPE=""
           SLOT_START_EPOCH=""
+          SLOT_END_EPOCH=""
 
           MORNING_COUNT=$(count_runs "$MORNING_START" "$MORNING_END")
           if [ "$NOW_EPOCH" -ge "$MORNING_START" ] && [ "$NOW_EPOCH" -lt "$MORNING_CATCHUP_END" ] && [ "$MORNING_COUNT" -eq 0 ]; then
             RUN_TYPE="morning"
             SLOT_START_EPOCH="$MORNING_START"
+            SLOT_END_EPOCH="$MORNING_END"
           elif [ "$NOW_EPOCH" -ge "$EVENING_START" ]; then
             EVENING_END=$(TZ=Asia/Kolkata date -d "$IST_DATE 17:00:00" +%s)
             EVENING_COUNT=$(count_runs "$EVENING_START" "$EVENING_END")
             if [ "$EVENING_COUNT" -eq 0 ]; then
               RUN_TYPE="evening"
               SLOT_START_EPOCH="$EVENING_START"
+              SLOT_END_EPOCH="$EVENING_END"
             fi
           elif [ "$HOUR_NUM" -ge 10 ] && [ "$HOUR_NUM" -le 14 ] && [ "$MIN_NUM" -ge 15 ]; then
             HOURLY_START=$(TZ=Asia/Kolkata date -d "$IST_DATE ${IST_HOUR}:15:00" +%s)
@@ -71,6 +74,7 @@ jobs:
             if [ "$HOURLY_COUNT" -eq 0 ]; then
               RUN_TYPE="hourly"
               SLOT_START_EPOCH="$HOURLY_START"
+              SLOT_END_EPOCH="$HOURLY_END"
             fi
           elif [ "$HOUR_NUM" -eq 15 ] && [ "$MIN_NUM" -ge 15 ] && [ "$MIN_NUM" -lt 45 ]; then
             HOURLY_START=$(TZ=Asia/Kolkata date -d "$IST_DATE 15:15:00" +%s)
@@ -79,6 +83,7 @@ jobs:
             if [ "$HOURLY_COUNT" -eq 0 ]; then
               RUN_TYPE="hourly"
               SLOT_START_EPOCH="$HOURLY_START"
+              SLOT_END_EPOCH="$HOURLY_END"
             fi
           fi
 
@@ -89,7 +94,7 @@ jobs:
 
           echo "Candidate dispatch for run_type=$RUN_TYPE"
 
-          EXISTING_COUNT=$(count_runs "$SLOT_START_EPOCH" "$((NOW_EPOCH + 1))")
+          EXISTING_COUNT=$(count_runs "$SLOT_START_EPOCH" "$SLOT_END_EPOCH")
           if [ "$EXISTING_COUNT" -gt 0 ]; then
             echo "A Daily NSE Scan run already exists for this slot window. Skipping dispatch."
             exit 0
