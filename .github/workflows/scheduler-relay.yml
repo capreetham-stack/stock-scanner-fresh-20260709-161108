@@ -3,7 +3,8 @@ name: Scheduler Relay
 on:
   schedule:
     # Poll every 5 minutes on weekdays and dispatch due slots in IST.
-    - cron: "*/5 3-10 * * 1-5"
+    # Runs 03:00-11:30 UTC = 08:30-17:00 IST to cover all market slots incl. evening 15:45 IST.
+    - cron: "*/5 3-11 * * 1-5"
   workflow_dispatch:
 
 permissions:
